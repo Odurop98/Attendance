@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<meta name="theme-color" content="#16231e">
+<title>Check in</title>
+<style>
+:root{--ink:#16231e;--ink2:#51605a;--line:#d8dfda;--paper:#edf1ee;--in:#0b7a4c;--in-bg:#e3f4ec;--warn:#b3261e;--gold:#e5a600}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;min-height:100vh;background:var(--paper);color:var(--ink);
+  font:17px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+main{max-width:480px;margin:0 auto;padding:max(28px,env(safe-area-inset-top)) 20px max(28px,env(safe-area-inset-bottom))}
+h1{margin:0 0 4px;font-size:30px;line-height:1.1;font-weight:800;letter-spacing:-.02em}
+.event{margin:0 0 24px;color:var(--ink2)}
+label{display:block;font-weight:650;margin-bottom:8px}
+input{width:100%;height:56px;border:2px solid var(--line);border-radius:14px;padding:0 16px;font-size:19px;
+  background:#fff;color:var(--ink);-webkit-appearance:none;appearance:none}
+input:focus{border-color:var(--ink);outline:none}
+.hint{color:var(--ink2);font-size:14px;margin:8px 0 0}
+.btn{width:100%;min-height:56px;margin-top:14px;border-radius:14px;border:2px solid var(--ink);background:var(--ink);color:#fff;
+  font:inherit;font-weight:700;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.btn:active{transform:scale(.98)}
+.btn:disabled{opacity:.6}
+.btn.alt{background:#fff;color:var(--ink);border-color:var(--line)}
+:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+.card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px;margin-top:20px}
+.pick{display:block;width:100%;text-align:left;padding:14px 16px;margin-top:10px;border-radius:12px;border:2px solid var(--line);
+  background:#fff;font:inherit;font-weight:650;cursor:pointer}
+.pick:active{border-color:var(--ink)}
+.pick small{display:block;color:var(--ink2);font-weight:400}
+.msg{margin-top:16px;color:var(--warn);font-weight:600}
+.msg.info{color:var(--ink2);font-weight:500}
+.done{text-align:center;padding-top:24px}
+.tick{width:92px;height:92px;border-radius:50%;background:var(--in);display:grid;place-items:center;margin:0 auto 20px}
+.tick svg{width:48px;height:48px}
+.tick path{stroke-dasharray:30;stroke-dashoffset:0;animation:t .4s ease-out}
+@keyframes t{from{stroke-dashoffset:30}to{stroke-dashoffset:0}}
+.done h1{font-size:28px}
+.done p{color:var(--ink2);margin:6px 0 0}
+.done.already .tick{background:var(--gold)}
+.dots::after{content:"";animation:d 1.2s steps(4,end) infinite}
+@keyframes d{0%{content:""}25%{content:"."}50%{content:".."}75%{content:"..."}}
+[hidden]{display:none!important}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+</style>
+</head>
+<body>
+<main>
+  <section id="ask">
+    <h1>Check in</h1>
+    <p class="event" id="eventName"></p>
+    <form id="form" autocomplete="off">
+      <label for="q">Your name, ID or phone number</label>
+      <input id="q" name="q" type="text" inputmode="text" autocapitalize="off" autocorrect="off" spellcheck="false"
+             placeholder="e.g. Ama Mensah" required>
+      <p class="hint">Type your first and last name, or the ID or phone number you registered with. Phone numbers work with or without the first 0.</p>
+      <button class="btn" id="find" type="submit">Find me</button>
+    </form>
+    <p class="msg" id="msg" role="alert" hidden></p>
+  </section>
+
+  <section id="choose" hidden>
+    <h1>Is this you?</h1>
+    <p class="event">Tap your name to check in.</p>
+    <div id="picks"></div>
+    <button class="btn alt" id="back" type="button">Search again</button>
+    <p class="msg" id="msg2" role="alert" hidden></p>
+  </section>
+
+  <section class="done" id="done" hidden>
+    <div class="tick"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.2 5.2L20 6.5"/></svg></div>
+    <h1 id="doneTitle"></h1>
+    <p id="doneSub"></p>
+    <p id="pendingNote" hidden></p>
+  </section>
+</main>
+
+<script>
+(function(){
+'use strict';
+
+/* ====== EDIT THESE TWO LINES ====== */
+var API = 'https://script.google.com/macros/s/AKfycbxAo3eAU9EpaZ9GcawYbfehvz-C47zhCrQKE5454xwkKkaWgdxEhgt8ds9jb2NkJ5WM/exec';
+var EVENT_NAME = '';   // shown under the title, e.g. 'Annual General Meeting 2026'
+/* ================================== */
+
+var CODE = new URLSearchParams(location.search).get('c') || '';
+var $ = function(id){ return document.getElementById(id); };
+var QUEUE = 'selfcheckin.pending';
+var DONE  = 'selfcheckin.done';
+$('eventName').textContent = EVENT_NAME;
+$('eventName').hidden = !EVENT_NAME;
+
+function show(id){ ['ask','choose','done'].forEach(function(s){ $(s).hidden = s!==id; }); window.scrollTo(0,0); }
+function say(el,text,info){ el.textContent=text; el.className='msg'+(info?' info':''); el.hidden=!text; }
+function store(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} }
+function load(k){ try{ return JSON.parse(localStorage.getItem(k)||'null'); }catch(e){ return null; } }
+function esc(s){ return String(s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+
+/* One request with a timeout and automatic retries, for weak connections.
+   text/plain keeps it a "simple" request, so the browser skips a CORS preflight. */
+function call(payload, tries){
+  tries = tries||3; payload.code = CODE;
+  return new Promise(function(resolve,reject){
+    var n=0;
+    (function attempt(){
+      n++;
+      var ctl = ('AbortController' in window) ? new AbortController() : null;
+      var timer = setTimeout(function(){ if(ctl) ctl.abort(); }, 15000);
+      fetch(API,{method:'POST',body:JSON.stringify(payload),signal:ctl?ctl.signal:undefined})
+        .then(function(r){ return r.json(); })
+        .then(function(j){ clearTimeout(timer); resolve(j); })
+        .catch(function(){ clearTimeout(timer); if(n<tries) setTimeout(attempt,800*n); else reject(new Error('network')); });
+    })();
+  });
+}
+function busy(btn,on,label){ btn.disabled=on; btn.textContent=on?label:btn.getAttribute('data-l'); btn.classList[on?'add':'remove']('dots'); }
+var findBtn=$('find'); findBtn.setAttribute('data-l','Find me');
+
+function errText(j){
+  if(!j) return 'Something went wrong. Please try again.';
+  if(j.error==='code') return 'This link is not valid for this event. Scan the QR code at the venue again.';
+  if(j.error==='setup') return 'Check-in is not set up yet. Please see the registration desk.';
+  return 'Something went wrong. Please try again, or see the registration desk.';
+}
+
+$('form').addEventListener('submit',function(e){
+  e.preventDefault(); say($('msg'),'');
+  var q=$('q').value.trim();
+  if(/\d/.test(q)){
+    if(q.replace(/\D/g,'').length<7 && q.replace(/[\s-]/g,'').length<7){ say($('msg'),'Enter your full ID or phone number.'); return; }
+  }else if(q.split(/[\s\-.,']+/).filter(function(t){return t.length>=2;}).length<2){
+    say($('msg'),'Enter your first and last name.'); return;
+  }
+  busy(findBtn,true,'Looking');
+  call({action:'find',q:q}).then(function(j){
+    busy(findBtn,false);
+    if(!j||!j.ok){ say($('msg'),errText(j)); return; }
+    if(j.tooMany){ say($('msg'),'Several people match that name. Add more of your name, or use your ID or phone number.'); return; }
+    if(!j.matches.length){ say($('msg'),'We could not find that. Check the spelling, try your ID or phone number, or see the registration desk.'); return; }
+    if(j.matches.length===1 && j.matches[0].at){ finished(j.matches[0].name,j.matches[0].at,true); return; }
+    $('picks').innerHTML=j.matches.map(function(m,i){
+      return '<button type="button" class="pick" data-i="'+i+'">'+esc(m.name)+(m.at?'<small>Already checked in</small>':(m.hint?'<small>'+esc(m.hint)+'</small>':''))+'</button>';
+    }).join('');
+    window.__matches=j.matches; show('choose');
+  }).catch(function(){
+    busy(findBtn,false);
+    say($('msg'),'No connection right now. Move to a spot with better signal and try again, or use the registration desk.');
+  });
+});
+
+$('picks').addEventListener('click',function(e){
+  var b=e.target.closest('.pick'); if(!b) return;
+  var m=window.__matches[+b.getAttribute('data-i')];
+  if(m.at){ finished(m.name,m.at,true); return; }
+  Array.prototype.forEach.call(document.querySelectorAll('.pick'),function(x){ x.disabled=true; });
+  say($('msg2'),'Checking you in…',true);
+  send(m);
+});
+$('back').addEventListener('click',function(){ say($('msg2'),''); show('ask'); $('q').select(); });
+
+function send(m){
+  call({action:'checkin',ref:m.ref},4).then(function(j){
+    if(j&&j.ok){ clearPending(m.ref); finished(j.name,j.at,j.already); }
+    else { say($('msg2'),errText(j)); enable(); }
+  }).catch(function(){
+    /* Connection dropped: keep the check-in and send it when the signal returns. */
+    var q=load(QUEUE)||[]; if(!q.some(function(x){return x.ref===m.ref;})) q.push({ref:m.ref,name:m.name,t:Date.now()});
+    store(QUEUE,q); finished(m.name,null,false,true);
+  });
+}
+function enable(){ Array.prototype.forEach.call(document.querySelectorAll('.pick'),function(x){ x.disabled=false; }); }
+function clearPending(ref){ var q=(load(QUEUE)||[]).filter(function(x){return x.ref!==ref;}); store(QUEUE,q); }
+
+function finished(name,at,already,pending){
+  var first=String(name).split(' ')[0];
+  var box=$('done'); box.className='done'+(already?' already':'');
+  if(pending){
+    $('doneTitle').textContent='Saved, '+first;
+    $('doneSub').textContent='Your phone has no signal right now. Keep this page open and your check-in will send itself as soon as it reconnects.';
+    $('pendingNote').hidden=true;
+  }else if(already){
+    $('doneTitle').textContent='Already checked in';
+    $('doneSub').textContent=name+', you checked in at '+String(at).slice(11,16)+'. Nothing more to do.';
+    $('pendingNote').hidden=true;
+    store(DONE,{name:name,at:at});
+  }else{
+    $('doneTitle').textContent='You are checked in, '+first;
+    $('doneSub').textContent='Checked in at '+String(at).slice(11,16)+'. Enjoy the event.';
+    $('pendingNote').hidden=true;
+    store(DONE,{name:name,at:at});
+  }
+  show('done');
+}
+
+/* Send anything that was saved while offline. */
+function flush(){
+  var q=load(QUEUE)||[]; if(!q.length) return;
+  var item=q[0];
+  call({action:'checkin',ref:item.ref},2).then(function(j){
+    if(j&&j.ok){
+      clearPending(item.ref);
+      $('doneTitle').textContent='You are checked in, '+String(item.name).split(' ')[0];
+      $('doneSub').textContent='Checked in at '+String(j.at).slice(11,16)+'. Enjoy the event.';
+      $('done').className='done'; flush();
+    }
+  }).catch(function(){});
+}
+window.addEventListener('online',flush);
+setInterval(flush,20000);
+flush();
+
+if(API.indexOf('PASTE_')===0){ say($('msg'),'Setup needed: add the web app URL in this file (see API near the top).'); }
+})();
+</script>
+</body>
+</html>
